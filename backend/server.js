@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 8000;
 
 // Database setup
-const db = new Database('./gaminghub.db');
+const db = new Database('./data/gaminghub.db');
 
 // Create tables
 db.exec(`
@@ -134,7 +134,7 @@ if (userCount.count === 0) {
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://localhost:3000', 'http://localhost:3001'],
   credentials: true
 }));
 app.use(express.json());
@@ -148,7 +148,7 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ success: false, message: 'Access token required' });
   }
 
-  jwt.verify(token, 'secret-key', (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET || 'secret-key', (err, user) => {
     if (err) {
       return res.status(401).json({ success: false, message: 'Invalid token' });
     }
@@ -172,7 +172,7 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(401).json({ success: false, message: 'Invalid credentials' });
   }
 
-  const token = jwt.sign({ id: user.id, email: user.email }, 'secret-key');
+  const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET || 'secret-key');
   res.json({
     success: true,
     data: { token, user: {
@@ -196,7 +196,7 @@ app.post('/api/auth/register', async (req, res) => {
     `);
     const result = insert.run(username, email, password || '', 0);
 
-    const token = jwt.sign({ id: result.lastInsertRowid, email }, 'secret-key');
+    const token = jwt.sign({ id: result.lastInsertRowid, email }, process.env.JWT_SECRET || 'secret-key');
     const user = {
       id: result.lastInsertRowid.toString(),
       username,
