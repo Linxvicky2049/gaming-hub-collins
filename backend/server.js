@@ -4,12 +4,21 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+// Ensure database directory exists
+const dbPath = path.join(__dirname, 'gaminghub.db');
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 // Database setup
-const db = new Database('./data/gaminghub.db');
+const db = new Database(dbPath);
 
 // Create tables
 db.exec(`
