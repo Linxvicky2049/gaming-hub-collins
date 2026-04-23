@@ -17,6 +17,16 @@ if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
+const path = require('path');
+
+// Serve frontend
+app.use(express.static(path.join(__dirname, 'dist')));
+
+// Catch all routes (for React Router)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
 // Database setup
 const db = new Database(dbPath);
 
