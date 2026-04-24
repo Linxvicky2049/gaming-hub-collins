@@ -17,7 +17,6 @@ if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-const path = require('path');
 
 // Serve frontend
 app.use(express.static(path.join(__dirname, 'dist')));
@@ -609,3 +608,22 @@ app.get('/api/stats', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const uri = process.env.MONGODB_URI;
+
+mongoose.connect(uri, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log("✅ Connected to MongoDB"))
+.catch(err => console.error("❌ MongoDB connection error:", err));
+const mongoose = require('mongoose');
+
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-hub')
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.log('MongoDB error:', err));
