@@ -10,6 +10,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
     "@hookform/resolvers": "^5.2.2",
     "framer-motion": "^12.38.0",
     "mongodb": "^7.2.0",

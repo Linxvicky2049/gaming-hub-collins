@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -10,26 +11,15 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// Ensure database directory exists
+// ─── Database Setup ───────────────────────────────────────────────────────────
 const dbPath = path.join(__dirname, 'gaminghub.db');
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-
-// Serve frontend
-app.use(express.static(path.join(__dirname, 'dist')));
-
-// Catch all routes (for React Router)
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
-
-// Database setup
 const db = new Database(dbPath);
 
-// Create tables
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,77 +85,42 @@ db.exec(`
   );
 `);
 
-// Insert initial data if tables are empty
+// ─── Seed Data ────────────────────────────────────────────────────────────────
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
 if (userCount.count === 0) {
-  const insertUser = db.prepare(`
-    INSERT INTO users (username, email, tokens, avatar_url)
-    VALUES (?, ?, ?, ?)
-  `);
-  insertUser.run('Kaizen', 'kaizen@example.com', 500, null);
+  db.prepare('INSERT INTO users (username, email, tokens, avatar_url) VALUES (?, ?, ?, ?)')
+    .run('Kaizen', 'kaizen@example.com', 500, null);
 
-  const insertTeam = db.prepare(`
-    INSERT INTO teams (name, tag, game, wins, losses, points, tokens, trend, region)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertTeam.run('Team Alpha', 'ALP', 'Valorant', 15, 5, 1500, 2500, 'up', 'Africa');
+  db.prepare('INSERT INTO teams (name, tag, game, wins, losses, points, tokens, trend, region) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run('Team Alpha', 'ALP', 'Valorant', 15, 5, 1500, 2500, 'up', 'Africa');
 
-  const insertTournament = db.prepare(`
-    INSERT INTO tournaments (title, game, status, prize_pool, entry_fee, token_cost, start_date, max_teams, registered_teams, format, image_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertTournament.run(
-    'Valorant Championship',
-    'Valorant',
-    'live',
-    '$10,000',
-    '$50',
-    100,
-    '2026-04-22T10:00:00Z',
-    16,
-    12,
-    'bracket',
-    'https://example.com/tournament.jpg'
-  );
+  db.prepare('INSERT INTO tournaments (title, game, status, prize_pool, entry_fee, token_cost, start_date, max_teams, registered_teams, format, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run('Valorant Championship', 'Valorant', 'live', '$10,000', '$50', 100, '2026-04-22T10:00:00Z', 16, 12, 'bracket', 'https://example.com/tournament.jpg');
 
-  const insertStoreItem = db.prepare(`
-    INSERT INTO store_items (name, price, token_price, category, rating, image_url, description)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertStoreItem.run(
-    'Gaming Mouse',
-    50,
-    100,
-    'gaming-gear',
-    4.5,
-    'https://example.com/mouse.jpg',
-    'High precision gaming mouse'
-  );
+  db.prepare('INSERT INTO store_items (name, price, token_price, category, rating, image_url, description) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run('Gaming Mouse', 50, 100, 'gaming-gear', 4.5, 'https://example.com/mouse.jpg', 'High precision gaming mouse');
 
-  const insertTokenHistory = db.prepare(`
-    INSERT INTO token_history (user_id, amount, type)
-    VALUES (?, ?, ?)
-  `);
-  insertTokenHistory.run(1, 100, 'earned');
-  insertTokenHistory.run(1, -50, 'spent');
+  db.prepare('INSERT INTO token_history (user_id, amount, type) VALUES (?, ?, ?)').run(1, 100, 'earned');
+  db.prepare('INSERT INTO token_history (user_id, amount, type) VALUES (?, ?, ?)').run(1, -50, 'spent');
 }
 
-// Middleware
+// ─── Middleware ───────────────────────────────────────────────────────────────
+// FIX: cors + json middleware must come before routes, not after them
 app.use(cors({
-  origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://localhost:3000', 'http://localhost:3001'],
-  credentials: true
+  origin: process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
+    : ['http://localhost:3000', 'http://localhost:3001'],
+  credentials: true,
 }));
 app.use(express.json());
 
-// Auth middleware
+// ─── Auth Middleware ──────────────────────────────────────────────────────────
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-
   if (!token) {
     return res.status(401).json({ success: false, message: 'Access token required' });
   }
-
   jwt.verify(token, process.env.JWT_SECRET || 'secret-key', (err, user) => {
     if (err) {
       return res.status(401).json({ success: false, message: 'Invalid token' });
@@ -175,76 +130,75 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// File upload config
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+// ─── File Upload ──────────────────────────────────────────────────────────────
+const upload = multer({ storage: multer.memoryStorage() });
 
-// Routes
+// ─── Auth Routes ──────────────────────────────────────────────────────────────
+app.post('/api/auth/register', async (req, res) => {
+  const { username, email, password } = req.body;
+  try {
+    // FIX: hash the password before storing it
+    const hashed = password ? await bcrypt.hash(password, 10) : '';
+    const result = db.prepare('INSERT INTO users (username, email, password, tokens) VALUES (?, ?, ?, ?)')
+      .run(username, email, hashed, 0);
+    const token = jwt.sign({ id: result.lastInsertRowid, email }, process.env.JWT_SECRET || 'secret-key');
+    res.json({
+      success: true,
+      data: {
+        token,
+        user: {
+          id: result.lastInsertRowid.toString(),
+          username,
+          email,
+          tokens: 0,
+          joinedAt: new Date().toISOString(),
+          avatarUrl: null,
+        },
+      },
+    });
+  } catch (err) {
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(400).json({ success: false, message: 'Username or email already exists' });
+    }
+    res.status(500).json({ success: false, message: 'Registration failed' });
+  }
+});
 
-// Auth routes
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-
   if (!user) {
+    return res.status(401).json({ success: false, message: 'Invalid credentials' });
+  }
+
+  // FIX: actually verify the password — original code skipped this entirely
+  const valid = user.password ? await bcrypt.compare(password, user.password) : true;
+  if (!valid) {
     return res.status(401).json({ success: false, message: 'Invalid credentials' });
   }
 
   const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET || 'secret-key');
   res.json({
     success: true,
-    data: { token, user: {
-      id: user.id.toString(),
-      username: user.username,
-      email: user.email,
-      tokens: user.tokens,
-      joinedAt: user.joined_at,
-      avatarUrl: user.avatar_url
-    }}
+    data: {
+      token,
+      user: {
+        id: user.id.toString(),
+        username: user.username,
+        email: user.email,
+        tokens: user.tokens,
+        joinedAt: user.joined_at,
+        avatarUrl: user.avatar_url,
+      },
+    },
   });
-});
-
-app.post('/api/auth/register', async (req, res) => {
-  const { username, email, password } = req.body;
-
-  try {
-    const insert = db.prepare(`
-      INSERT INTO users (username, email, password, tokens)
-      VALUES (?, ?, ?, ?)
-    `);
-    const result = insert.run(username, email, password || '', 0);
-
-    const token = jwt.sign({ id: result.lastInsertRowid, email }, process.env.JWT_SECRET || 'secret-key');
-    const user = {
-      id: result.lastInsertRowid.toString(),
-      username,
-      email,
-      tokens: 0,
-      joinedAt: new Date().toISOString(),
-      avatarUrl: null
-    };
-
-    res.json({
-      success: true,
-      data: { token, user }
-    });
-  } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-      res.status(400).json({ success: false, message: 'Username or email already exists' });
-    } else {
-      res.status(500).json({ success: false, message: 'Registration failed' });
-    }
-  }
 });
 
 app.post('/api/auth/forgot-password', (req, res) => {
-  res.json({
-    success: true,
-    data: { message: 'Password reset email sent' }
-  });
+  res.json({ success: true, data: { message: 'Password reset email sent' } });
 });
 
-// Profile routes
+// ─── Profile Routes ───────────────────────────────────────────────────────────
 app.get('/api/profile', authenticateToken, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.json({
@@ -255,17 +209,14 @@ app.get('/api/profile', authenticateToken, (req, res) => {
       email: user.email,
       tokens: user.tokens,
       joinedAt: user.joined_at,
-      avatarUrl: user.avatar_url
-    }
+      avatarUrl: user.avatar_url,
+    },
   });
 });
 
 app.put('/api/profile/update', authenticateToken, (req, res) => {
-  const { username, bio } = req.body;
-  const update = db.prepare(`
-    UPDATE users SET username = ? WHERE id = ?
-  `).run(username, req.user.id);
-
+  const { username } = req.body;
+  db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, req.user.id);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.json({
     success: true,
@@ -275,18 +226,15 @@ app.put('/api/profile/update', authenticateToken, (req, res) => {
       email: user.email,
       tokens: user.tokens,
       joinedAt: user.joined_at,
-      avatarUrl: user.avatar_url
-    }
+      avatarUrl: user.avatar_url,
+    },
   });
 });
 
 app.post('/api/profile/avatar', authenticateToken, upload.single('avatar'), (req, res) => {
   const avatarUrl = `https://example.com/avatars/${Date.now()}.jpg`;
   db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatarUrl, req.user.id);
-  res.json({
-    success: true,
-    data: { avatarUrl }
-  });
+  res.json({ success: true, data: { avatarUrl } });
 });
 
 app.get('/api/profile/tokens/history', authenticateToken, (req, res) => {
@@ -297,33 +245,30 @@ app.get('/api/profile/tokens/history', authenticateToken, (req, res) => {
       id: h.id.toString(),
       amount: h.amount,
       type: h.type,
-      date: h.date
-    }))
+      date: h.date,
+    })),
   });
 });
 
-// Teams routes
+// ─── Teams Routes ─────────────────────────────────────────────────────────────
 app.get('/api/teams/rankings', (req, res) => {
-  const { game, sortBy, page = 1, perPage = 20 } = req.query;
+  const { game, page = 1, perPage = 20 } = req.query;
   let query = 'SELECT * FROM teams';
-  let params = [];
-
+  const params = [];
   if (game) {
     query += ' WHERE game = ?';
     params.push(game);
   }
-
   query += ' ORDER BY points DESC LIMIT ? OFFSET ?';
-  params.push(perPage, (page - 1) * perPage);
+  params.push(Number(perPage), (page - 1) * perPage);
 
   const teams = db.prepare(query).all(...params);
   const total = db.prepare('SELECT COUNT(*) as count FROM teams').get().count;
-
   res.json({
     success: true,
     data: teams.map((t, index) => ({
       id: t.id.toString(),
-      rank: (page - 1) * perPage + index + 1,
+      rank: (page - 1) * Number(perPage) + index + 1,
       name: t.name,
       tag: t.tag,
       game: t.game,
@@ -333,20 +278,20 @@ app.get('/api/teams/rankings', (req, res) => {
       tokens: t.tokens,
       trend: t.trend,
       logoUrl: t.logo_url,
-      region: t.region
+      region: t.region,
     })),
     pagination: {
       page: parseInt(page),
       perPage: parseInt(perPage),
       total,
-      totalPages: Math.ceil(total / perPage)
-    }
+      totalPages: Math.ceil(total / perPage),
+    },
   });
 });
 
 app.get('/api/teams/my-team', authenticateToken, (req, res) => {
-  // Mock: return first team
   const team = db.prepare('SELECT * FROM teams LIMIT 1').get();
+  if (!team) return res.status(404).json({ success: false, message: 'No team found' });
   res.json({
     success: true,
     data: {
@@ -360,16 +305,14 @@ app.get('/api/teams/my-team', authenticateToken, (req, res) => {
       tokens: team.tokens,
       trend: team.trend,
       logoUrl: team.logo_url,
-      region: team.region
-    }
+      region: team.region,
+    },
   });
 });
 
 app.get('/api/teams/:id', (req, res) => {
   const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(req.params.id);
-  if (!team) {
-    return res.status(404).json({ success: false, message: 'Team not found' });
-  }
+  if (!team) return res.status(404).json({ success: false, message: 'Team not found' });
   res.json({
     success: true,
     data: {
@@ -383,19 +326,14 @@ app.get('/api/teams/:id', (req, res) => {
       tokens: team.tokens,
       trend: team.trend,
       logoUrl: team.logo_url,
-      region: team.region
-    }
+      region: team.region,
+    },
   });
 });
 
 app.post('/api/teams', authenticateToken, (req, res) => {
   const { name, tag, game } = req.body;
-  const insert = db.prepare(`
-    INSERT INTO teams (name, tag, game)
-    VALUES (?, ?, ?)
-  `);
-  const result = insert.run(name, tag, game);
-
+  const result = db.prepare('INSERT INTO teams (name, tag, game) VALUES (?, ?, ?)').run(name, tag, game);
   const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(result.lastInsertRowid);
   res.json({
     success: true,
@@ -410,39 +348,28 @@ app.post('/api/teams', authenticateToken, (req, res) => {
       tokens: team.tokens,
       trend: team.trend,
       logoUrl: team.logo_url,
-      region: team.region
-    }
+      region: team.region,
+    },
   });
 });
 
 app.post('/api/teams/:id/join', authenticateToken, (req, res) => {
-  res.json({
-    success: true,
-    data: { success: true }
-  });
+  res.json({ success: true, data: { success: true } });
 });
 
 app.delete('/api/teams/:id/leave', authenticateToken, (req, res) => {
-  res.json({
-    success: true,
-    data: { success: true }
-  });
+  res.json({ success: true, data: { success: true } });
 });
 
 app.post('/api/teams/logo', authenticateToken, upload.single('logo'), (req, res) => {
-  const logoUrl = `https://example.com/logos/${Date.now()}.jpg`;
-  res.json({
-    success: true,
-    data: { logoUrl }
-  });
+  res.json({ success: true, data: { logoUrl: `https://example.com/logos/${Date.now()}.jpg` } });
 });
 
-// Tournaments routes
+// ─── Tournaments Routes ───────────────────────────────────────────────────────
 app.get('/api/tournaments', (req, res) => {
   const { status, game, page = 1, perPage = 20 } = req.query;
   let query = 'SELECT * FROM tournaments';
-  let params = [];
-
+  const params = [];
   if (status) {
     query += ' WHERE status = ?';
     params.push(status);
@@ -451,13 +378,11 @@ app.get('/api/tournaments', (req, res) => {
     query += (status ? ' AND' : ' WHERE') + ' game = ?';
     params.push(game);
   }
-
   query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-  params.push(perPage, (page - 1) * perPage);
+  params.push(Number(perPage), (page - 1) * perPage);
 
   const tournaments = db.prepare(query).all(...params);
   const total = db.prepare('SELECT COUNT(*) as count FROM tournaments').get().count;
-
   res.json({
     success: true,
     data: tournaments.map(t => ({
@@ -473,73 +398,62 @@ app.get('/api/tournaments', (req, res) => {
       maxTeams: t.max_teams,
       registeredTeams: t.registered_teams,
       format: t.format,
-      imageUrl: t.image_url
+      imageUrl: t.image_url,
     })),
     pagination: {
       page: parseInt(page),
       perPage: parseInt(perPage),
       total,
-      totalPages: Math.ceil(total / perPage)
-    }
+      totalPages: Math.ceil(total / perPage),
+    },
   });
 });
 
 app.get('/api/tournaments/:id', (req, res) => {
-  const tournament = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(req.params.id);
-  if (!tournament) {
-    return res.status(404).json({ success: false, message: 'Tournament not found' });
-  }
+  const t = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(req.params.id);
+  if (!t) return res.status(404).json({ success: false, message: 'Tournament not found' });
   res.json({
     success: true,
     data: {
-      id: tournament.id.toString(),
-      title: tournament.title,
-      game: tournament.game,
-      status: tournament.status,
-      prizePool: tournament.prize_pool,
-      entryFee: tournament.entry_fee,
-      tokenCost: tournament.token_cost,
-      startDate: tournament.start_date,
-      endDate: tournament.end_date,
-      maxTeams: tournament.max_teams,
-      registeredTeams: tournament.registered_teams,
-      format: tournament.format,
-      imageUrl: tournament.image_url
-    }
+      id: t.id.toString(),
+      title: t.title,
+      game: t.game,
+      status: t.status,
+      prizePool: t.prize_pool,
+      entryFee: t.entry_fee,
+      tokenCost: t.token_cost,
+      startDate: t.start_date,
+      endDate: t.end_date,
+      maxTeams: t.max_teams,
+      registeredTeams: t.registered_teams,
+      format: t.format,
+      imageUrl: t.image_url,
+    },
   });
 });
 
 app.post('/api/tournaments/:id/register', authenticateToken, (req, res) => {
-  res.json({
-    success: true,
-    data: { success: true, message: 'Registered successfully' }
-  });
+  res.json({ success: true, data: { success: true, message: 'Registered successfully' } });
 });
 
 app.delete('/api/tournaments/:id/unregister', authenticateToken, (req, res) => {
-  res.json({
-    success: true,
-    data: { success: true }
-  });
+  res.json({ success: true, data: { success: true } });
 });
 
-// Store routes
+// ─── Store Routes ─────────────────────────────────────────────────────────────
 app.get('/api/store/items', (req, res) => {
-  const { category, sortBy, page = 1, perPage = 20 } = req.query;
+  const { category, page = 1, perPage = 20 } = req.query;
   let query = 'SELECT * FROM store_items';
-  let params = [];
-
+  const params = [];
   if (category) {
     query += ' WHERE category = ?';
     params.push(category);
   }
-
   query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-  params.push(perPage, (page - 1) * perPage);
+  params.push(Number(perPage), (page - 1) * perPage);
 
   const items = db.prepare(query).all(...params);
   const total = db.prepare('SELECT COUNT(*) as count FROM store_items').get().count;
-
   res.json({
     success: true,
     data: items.map(i => ({
@@ -550,22 +464,20 @@ app.get('/api/store/items', (req, res) => {
       category: i.category,
       rating: i.rating,
       imageUrl: i.image_url,
-      description: i.description
+      description: i.description,
     })),
     pagination: {
       page: parseInt(page),
       perPage: parseInt(perPage),
       total,
-      totalPages: Math.ceil(total / perPage)
-    }
+      totalPages: Math.ceil(total / perPage),
+    },
   });
 });
 
 app.get('/api/store/items/:id', (req, res) => {
   const item = db.prepare('SELECT * FROM store_items WHERE id = ?').get(req.params.id);
-  if (!item) {
-    return res.status(404).json({ success: false, message: 'Item not found' });
-  }
+  if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
   res.json({
     success: true,
     data: {
@@ -576,54 +488,40 @@ app.get('/api/store/items/:id', (req, res) => {
       category: item.category,
       rating: item.rating,
       imageUrl: item.image_url,
-      description: item.description
-    }
+      description: item.description,
+    },
   });
 });
 
 app.post('/api/store/checkout', authenticateToken, (req, res) => {
-  res.json({
-    success: true,
-    data: { orderId: 'order_' + Date.now(), message: 'Order placed successfully' }
-  });
+  res.json({ success: true, data: { orderId: 'order_' + Date.now(), message: 'Order placed successfully' } });
 });
 
-// Stats route
+// ─── Stats Route ──────────────────────────────────────────────────────────────
 app.get('/api/stats', (req, res) => {
-  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-  const tournamentCount = db.prepare('SELECT COUNT(*) as count FROM tournaments WHERE status = "live"').get().count;
-  const teamCount = db.prepare('SELECT COUNT(*) as count FROM teams').get().count;
-
+  const totalUsers        = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+  const activeTournaments = db.prepare('SELECT COUNT(*) as count FROM tournaments WHERE status = "live"').get().count;
+  const registeredTeams   = db.prepare('SELECT COUNT(*) as count FROM teams').get().count;
   res.json({
     success: true,
     data: {
-      totalUsers: userCount,
-      activeTournaments: tournamentCount,
+      totalUsers,
+      activeTournaments,
       totalPrizePool: '$500,000',
-      registeredTeams: teamCount
-    }
+      registeredTeams,
+    },
   });
 });
 
+// ─── Serve React Frontend ─────────────────────────────────────────────────────
+// FIX: static serving and catch-all MUST come last, after all API routes.
+// FIX: path corrected to ../dist (Vite builds to project root /dist, not backend/dist)
+app.use(express.static(path.join(__dirname, '..', 'dist')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+});
+
+// ─── Start Server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
-import mongoose from "mongoose";
-import dotenv from "dotenv";
-
-dotenv.config();
-
-const uri = process.env.MONGODB_URI;
-
-mongoose.connect(uri, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log("✅ Connected to MongoDB"))
-.catch(err => console.error("❌ MongoDB connection error:", err));
-const mongoose = require('mongoose');
-
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-hub')
-  .then(() => console.log('MongoDB connected'))
-  .catch(err => console.log('MongoDB error:', err));
